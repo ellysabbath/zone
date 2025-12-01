@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useModal } from "../../hooks/useModal";
 import { Modal } from "../ui/modal";
 import Button from "../ui/button/Button";
@@ -6,22 +6,34 @@ import Input from "../form/input/InputField";
 import Label from "../form/Label";
 import { apiService, FullUser, UpdateProfileRequest } from "../../services/api";
 
+interface FormData {
+  first_name: string;
+  last_name: string;
+  email: string;
+  bio: string;
+  phone: string;
+  location: string;
+  facebook_url: string;
+  twitter_url: string;
+  linkedin_url: string;
+  instagram_url: string;
+  country: string;
+  city_state: string;
+  postal_code: string;
+  tax_id: string;
+}
+
 export default function UserMetaCard() {
   const { isOpen, openModal, closeModal } = useModal();
   const [user, setUser] = useState<FullUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [profilePicture, setProfilePicture] = useState<File | null>(null);
-  const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
   
-  const [formData, setFormData] = useState({
-    // User fields
+  const [formData, setFormData] = useState<FormData>({
     first_name: "",
     last_name: "",
     email: "",
-    
-    // Profile fields
     bio: "",
     phone: "",
     location: "",
@@ -35,23 +47,44 @@ export default function UserMetaCard() {
     tax_id: "",
   });
 
-  useEffect(() => {
-    if (!apiService.isAuthenticated()) {
-      setError("Please log in to view your profile");
-      setLoading(false);
-      return;
-    }
-    fetchProfile();
+  const handleLogout = useCallback(() => {
+    // Safe logout handling without accessing private methods
+    window.location.href = '/signin';
   }, []);
 
-  const fetchProfile = async () => {
+  const extractErrorMessage = useCallback((error: unknown): string => {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === 'object' && error !== null) {
+      if ('message' in error && typeof error.message === 'string') {
+        return error.message;
+      }
+      if ('details' in error && 
+          typeof error.details === 'object' && 
+          error.details !== null &&
+          'message' in error.details && 
+          typeof error.details.message === 'string') {
+        return error.details.message;
+      }
+    }
+    return 'An unexpected error occurred';
+  }, []);
+
+  const fetchProfile = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
+      
+      if (!apiService.isAuthenticated()) {
+        setError("Please log in to view your profile");
+        setLoading(false);
+        return;
+      }
+
       const userData = await apiService.getUserProfile();
       setUser(userData);
       
-      // Initialize form data with current data
       setFormData({
         first_name: userData.first_name || "",
         last_name: userData.last_name || "",
@@ -68,52 +101,29 @@ export default function UserMetaCard() {
         postal_code: userData.profile.postal_code || "",
         tax_id: userData.profile.tax_id || "",
       });
-    } catch (error: any) {
-      console.error('Error fetching profile:', error);
-      setError(error.message || 'Failed to load profile');
+    } catch (err: unknown) {
+      console.error('Error fetching profile:', err);
+      const errorMessage = extractErrorMessage(err);
+      setError(errorMessage);
       
-      if (error.status === 401) {
-        apiService.clearAuth();
-        window.location.href = '/signin';
+      if (err && typeof err === 'object' && 'status' in err && err.status === 401) {
+        handleLogout();
       }
     } finally {
       setLoading(false);
     }
-  };
+  }, [extractErrorMessage, handleLogout]);
 
-  const handleInputChange = (field: keyof typeof formData, value: string) => {
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
+
+  const handleInputChange = useCallback((field: keyof FormData, value: string) => {
     setFormData(prev => ({
       ...prev,
       [field]: value
     }));
-  };
-
-  const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        setError('Please select a valid image file (JPG, PNG, WebP)');
-        return;
-      }
-      
-      // Validate file size (5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        setError('Image size should be less than 5MB');
-        return;
-      }
-      
-      setProfilePicture(file);
-      setError(null);
-      
-      // Create preview
-      const reader = new FileReader();
-      reader.onload = () => {
-        setProfilePicturePreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+  }, []);
 
   const handleSave = async () => {
     try {
@@ -125,50 +135,36 @@ export default function UserMetaCard() {
         return;
       }
 
-      // Prepare update data
       const updateData: UpdateProfileRequest = { ...formData };
-      
-      // Add profile picture if changed
-      if (profilePicture) {
-        updateData.profile_picture = profilePicture;
-      }
-
-      console.log('Updating profile with data:', updateData);
-
       const updatedUser = await apiService.updateUserProfile(updateData);
       setUser(updatedUser);
-      
-      // Reset profile picture state
-      setProfilePicture(null);
-      setProfilePicturePreview(null);
-      
       closeModal();
-    } catch (error: any) {
-      console.error('Error updating profile:', error);
-      setError(
-        error.message || 
-        error.details?.message || 
-        'Failed to update profile. Please check your data and try again.'
-      );
+    } catch (err: unknown) {
+      console.error('Error updating profile:', err);
+      const errorMessage = extractErrorMessage(err);
+      setError(errorMessage);
       
-      if (error.status === 401) {
-        apiService.clearAuth();
-        window.location.href = '/signin';
+      if (err && typeof err === 'object' && 'status' in err && err.status === 401) {
+        handleLogout();
       }
     } finally {
       setSaving(false);
     }
   };
 
-  const getDisplayLocation = () => {
+  const getDisplayValue = useCallback((value: string | null | undefined, fallback: string = "Not provided"): string => {
+    return value?.trim() ? value : fallback;
+  }, []);
+
+  const getDisplayLocation = useCallback((): string => {
     const profile = user?.profile;
     if (profile?.city_state && profile?.country) {
       return `${profile.city_state}, ${profile.country}`;
     }
     return profile?.city_state || profile?.country || "No location provided";
-  };
+  }, [user]);
 
-  const getProfileInitial = () => {
+  const getProfileInitial = useCallback((): string => {
     if (user?.first_name) {
       return user.first_name.charAt(0).toUpperCase();
     }
@@ -176,15 +172,15 @@ export default function UserMetaCard() {
       return user.username.charAt(0).toUpperCase();
     }
     return "U";
-  };
+  }, [user]);
 
-  const getFullName = () => {
+  const getFullName = useCallback((): string => {
     if (user) {
       const fullName = `${user.first_name} ${user.last_name}`.trim();
-      return fullName || user.username;
+      return fullName || user.username || "User";
     }
     return "User";
-  };
+  }, [user]);
 
   if (loading) {
     return (
@@ -228,7 +224,7 @@ export default function UserMetaCard() {
               </h4>
               <div className="flex flex-col items-center gap-1 text-center xl:flex-row xl:gap-3 xl:text-left">
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {profile?.bio || "No bio provided"}
+                  {getDisplayValue(profile?.bio, "No bio provided")}
                 </p>
                 <div className="hidden h-3.5 w-px bg-gray-300 dark:bg-gray-700 xl:block"></div>
                 <p className="text-sm text-gray-500 dark:text-gray-400">

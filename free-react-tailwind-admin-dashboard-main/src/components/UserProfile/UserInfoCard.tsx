@@ -66,12 +66,15 @@ export default function UserInfoCard() {
         postal_code: userData.profile.postal_code || "",
         tax_id: userData.profile.tax_id || "",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error fetching profile:', error);
-      setError(error.message || 'Failed to load profile');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load profile';
+      setError(errorMessage);
       
-      if (error.status === 401) {
-        apiService.clearAuth();
+      // Handle authentication errors
+      if (error && typeof error === 'object' && 'status' in error && error.status === 401) {
+        // Use logout method instead of private clearAuth
+        apiService.logout(); // Assuming you have a public logout method
         window.location.href = '/signin';
       }
     } finally {
@@ -105,16 +108,27 @@ export default function UserInfoCard() {
       setUser(updatedUser);
       
       closeModal();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error updating profile:', error);
-      setError(
-        error.message || 
-        error.details?.message || 
-        'Failed to update profile. Please check your data and try again.'
-      );
+      let errorMessage = 'Failed to update profile. Please check your data and try again.';
       
-      if (error.status === 401) {
-        apiService.clearAuth();
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      } else if (error && typeof error === 'object') {
+        // Handle error objects with details
+        if ('details' in error && typeof error.details === 'object' && error.details && 'message' in error.details) {
+          errorMessage = String(error.details.message);
+        } else if ('message' in error) {
+          errorMessage = String(error.message);
+        }
+      }
+      
+      setError(errorMessage);
+      
+      // Handle authentication errors
+      if (error && typeof error === 'object' && 'status' in error && error.status === 401) {
+        // Use logout method instead of private clearAuth
+        apiService.logout(); // Assuming you have a public logout method
         window.location.href = '/signin';
       }
     } finally {
@@ -126,10 +140,11 @@ export default function UserInfoCard() {
     return value && value.trim() !== "" ? value : fallback;
   };
 
-  const getFullName = () => {
+  // This function is actually used in the JSX below, so we'll keep it
+  const getFullName = (): string => {
     if (user) {
       const fullName = `${user.first_name} ${user.last_name}`.trim();
-      return fullName || user.username;
+      return fullName || user.username || "User";
     }
     return "User";
   };
@@ -163,6 +178,16 @@ export default function UserInfoCard() {
           <h4 className="text-lg font-semibold text-gray-800 dark:text-white/90 lg:mb-6">
             Personal Information
           </h4>
+
+          {/* Display user's full name at the top */}
+          <div className="mb-6">
+            <p className="mb-2 text-xs leading-normal text-gray-500 dark:text-gray-400">
+              Full Name
+            </p>
+            <p className="text-lg font-medium text-gray-800 dark:text-white/90">
+              {getFullName()}
+            </p>
+          </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-7 2xl:gap-x-32">
             <div>
@@ -360,15 +385,16 @@ export default function UserInfoCard() {
         </button>
       </div>
 
-      <Modal isOpen={isOpen} onClose={closeModal} className="max-w-[700px] m-4">
-        <div className="no-scrollbar relative w-full max-w-[700px] overflow-y-auto rounded-3xl bg-white p-4 dark:bg-gray-900 lg:p-11">
+      <Modal isOpen={isOpen} onClose={closeModal} className="max-w-[700px] overflow-y-auto  max-h-[100vh]   m-4">
+        <div className="relative w-full max-w-[700px] overflow-y-auto rounded-3xl bg-white p-4 dark:bg-gray-900 lg:p-11">
           <div className="px-2 pr-14">
-            <h4 className="mb-2 text-2xl font-semibold text-gray-800 dark:text-white/90">
-              Edit Personal Information
-            </h4>
+
             <p className="mb-6 text-sm text-gray-500 dark:text-gray-400 lg:mb-7">
               Update your details to keep your profile up-to-date.
             </p>
+              <h4 className="mb-2 text-2xl font-semibold text-gray-800 dark:text-white/90">
+              Edit Personal Information
+            </h4>
           </div>
 
           {error && (
